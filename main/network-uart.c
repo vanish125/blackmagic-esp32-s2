@@ -32,6 +32,15 @@ typedef struct {
 
 static NetworkUART network_uart;
 
+typedef struct {
+    StreamBufferHandle_t rx_stream;
+    bool rx_stream_full;
+    uint8_t tx_buffer[UART_TX_BUFFER_SIZE];
+    size_t tx_buffer_index;
+} UARTGlue;
+
+static UARTGlue uart_glue;
+
 
 void network_uart_send(uint8_t* buffer, size_t size) {
     int to_write = size;
@@ -62,7 +71,58 @@ void receive_and_send_to_uart(void) {
     free(buffer_rx);
 }
 
+size_t uart_glue_get_free_size(void) {
+    return xStreamBufferSpacesAvailable(uart_glue.rx_stream);
+}
 
+void uart_glue_receive(uint8_t* buffer, size_t size) {
+    size_t ret = xStreamBufferSend(uart_glue.rx_stream, buffer, size, portMAX_DELAY);
+    ESP_ERROR_CHECK(ret != size);
+}
+
+bool uart_glue_can_receive() {
+    uint16_t max_len = xStreamBufferSpacesAvailable(uart_glue.rx_stream);
+    bool can_receive = true;
+
+    if(max_len <= 0) {
+        uart_glue.rx_stream_full = true;
+        ESP_LOGE(TAG, "Stream is full");
+        can_receive = false;
+    };
+
+    return can_receive;
+}
+
+size_t uart_glue_get_packet_size() {
+    return UART_RX_PACKET_MAX_SIZE;
+}
+
+const char* uart_glue_get_bm_version() {
+    return FIRMWARE_VERSION;
+}
+
+void uart_glue_init(void) {
+    uart_glue.rx_stream = xStreamBufferCreate(UART_RX_BUFFER_SIZE, 1);
+    uart_glue.rx_stream_full = false;
+    uart_glue.tx_buffer_index = 0;
+}
+
+unsigned char uart_if_getchar_to(int timeout) {
+    uint8_t data;
+    size_t received = xStreamBufferReceive(uart_glue.rx_stream, &data, sizeof(uint8_t), timeout);
+
+    if(received == 0) {
+        return -1;
+    }
+
+    if(uart_glue.rx_stream_full &&
+       xStreamBufferSpacesAvailable(uart_glue.rx_stream) >= UART_RX_PACKET_MAX_SIZE) {
+        uart_glue.rx_stream_full = false;
+        ESP_LOGW(TAG, "Stream freed");
+    }
+
+    return data;
+}
 
 static void network_uart_server_task(void* pvParameters) {
     char addr_str[128];

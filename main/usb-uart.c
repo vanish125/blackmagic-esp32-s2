@@ -16,6 +16,10 @@
 
 static StreamBufferHandle_t uart_rx_stream;
 
+/* GDB socket */
+bool network_uart_connected(void);
+void network_uart_send(uint8_t* buffer, size_t size);
+
 static void usb_uart_rx_isr(void* context);
 static void usb_uart_rx_task(void* pvParameters);
 
